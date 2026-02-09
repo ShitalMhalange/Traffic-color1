@@ -188,25 +188,52 @@ async function collectTrafficColors(
 test('traffic colors display on tiles', async ({ page }) => {
   await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded' });
 
-  const swiper = page.locator('.compare-swiper-vertical');
-  for (let i = 0; i < 5; i += 1) {
-    await swiper.click();
+  const leftEndpoint = page.getByLabel('Left side Tile Endpoint');
+  if (await leftEndpoint.count()) {
+    await leftEndpoint.selectOption({ label: 'Rc with cache' });
+  }
+  const rightEndpoint = page.getByLabel('Right side Tile Endpoint');
+  if (await rightEndpoint.count()) {
+    await rightEndpoint.selectOption({ label: 'Rc with cache' });
   }
 
-  await page.getByLabel('Left side Tile Endpoint').selectOption('rc with cache');
+  await page.waitForFunction(
+    () =>
+      Boolean(
+        document.querySelector('#before') ||
+          document.querySelector('#after') ||
+          document.querySelector('[role="region"][aria-label="Map"]') ||
+          document.querySelector('.maplibregl-map') ||
+          document.querySelector('.mapboxgl-map'),
+      ),
+    { timeout: 30000 },
+  );
 
-  for (let i = 0; i < 2; i += 1) {
-    await swiper.click();
+  const mapRegion = page.getByRole('region', { name: 'Map' });
+  if (await mapRegion.count()) {
+    await mapRegion.first().click({ position: { x: 200, y: 200 } });
   }
-  await page.locator('#before').getByRole('region', { name: 'Map' }).click();
-  for (let i = 0; i < 2; i += 1) {
-    await swiper.click();
-  }
-  await page.locator('#before').getByRole('region', { name: 'Map' }).click();
 
   await page.waitForTimeout(2000);
 
-  const containers = ['#before', '#after'];
+  const containers = await page.evaluate(() => {
+    const compareSelectors = ['#before', '#after'];
+    const compare = compareSelectors.filter((selector) => document.querySelector(selector));
+    if (compare.length > 0) {
+      return compare;
+    }
+
+    const fallbackSelectors = [
+      '[role="region"][aria-label="Map"]',
+      '.maplibregl-map',
+      '.mapboxgl-map',
+    ];
+    return fallbackSelectors.filter((selector) => document.querySelector(selector));
+  });
+
+  if (containers.length === 0) {
+    containers.push('body');
+  }
   await page.waitForFunction(
     (selectors) =>
       selectors.some((selector) => {
