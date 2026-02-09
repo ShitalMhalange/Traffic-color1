@@ -13,6 +13,9 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     trace: 'on-first-retry',
     video: 'retain-on-failure',
+    launchOptions: {
+      args: ['--use-gl=swiftshader', '--ignore-gpu-blocklist'],
+    },
   },
   projects: [
     {
