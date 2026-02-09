@@ -209,11 +209,6 @@ test('traffic colors display on tiles', async ({ page }) => {
     { timeout: 30000 },
   );
 
-  const mapRegion = page.getByRole('region', { name: 'Map' });
-  if (await mapRegion.count()) {
-    await mapRegion.first().click({ position: { x: 200, y: 200 } });
-  }
-
   await page.waitForTimeout(2000);
 
   const containers = await page.evaluate(() => {
