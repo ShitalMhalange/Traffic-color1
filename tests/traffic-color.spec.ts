@@ -250,17 +250,6 @@ test('traffic colors display on tiles', async ({ page }) => {
   );
   const tiles = await collectTrafficColors(page, containers);
 
-  expect(tiles.length).toBeGreaterThan(0);
-
-  const tilesWithData = tiles.filter((tile) => !tile.error);
-  expect(tilesWithData.length).toBeGreaterThan(0);
-
-  const tilesWithColors = tilesWithData.filter((tile) => tile.colors.length > 0);
-  expect(tilesWithColors.length).toBeGreaterThan(0);
-
-  const colorsFound = new Set(tilesWithColors.flatMap((tile) => tile.colors));
-  expect(colorsFound.size).toBeGreaterThan(0);
-
   const summary = tiles.map((tile) => ({
     container: tile.container,
     tileId: tile.tileId,
@@ -276,4 +265,15 @@ test('traffic colors display on tiles', async ({ page }) => {
   });
 
   console.log('Traffic color summary:', JSON.stringify(summary, null, 2));
+
+  expect(tiles.length).toBeGreaterThan(0);
+
+  const tilesWithData = tiles.filter((tile) => !tile.error);
+  expect(tilesWithData.length).toBeGreaterThan(0);
+
+  const tilesWithColors = tilesWithData.filter((tile) => tile.colors.length > 0);
+  expect(tilesWithColors.length).toBeGreaterThan(0);
+
+  const colorsFound = new Set(tilesWithColors.flatMap((tile) => tile.colors));
+  expect(colorsFound.size).toBeGreaterThan(0);
 });
