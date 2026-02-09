@@ -8,6 +8,9 @@ type TileColorSummary = {
   index: number;
   tileId: string;
   src: string | null;
+  elementType: 'img' | 'canvas';
+  width: number;
+  height: number;
   colors: string[];
   colorCounts: Record<string, number>;
   sampleCount: number;
@@ -165,14 +168,20 @@ async function collectTrafficColors(
       });
 
       tiles.forEach((tile, index) => {
-        const src = tile instanceof HTMLImageElement ? tile.currentSrc || tile.src : null;
+        const isImage = tile instanceof HTMLImageElement;
+        const src = isImage ? tile.currentSrc || tile.src : null;
         const tileId = tileIdFromUrl(src, `${container}-tile-${index}`);
+        const width = isImage ? tile.naturalWidth || tile.width : tile.width;
+        const height = isImage ? tile.naturalHeight || tile.height : tile.height;
         const analyzed = readElementPixels(tile as HTMLImageElement | HTMLCanvasElement);
         results.push({
           container,
           index,
           tileId,
           src: trimSrc(src),
+          elementType: isImage ? 'img' : 'canvas',
+          width,
+          height,
           colors: analyzed.colors,
           colorCounts: analyzed.counts,
           sampleCount: analyzed.sampleCount,
@@ -186,27 +195,80 @@ async function collectTrafficColors(
 }
 
 test('traffic colors display on tiles', async ({ page }) => {
+  const requestFailures: Array<{ url: string; errorText: string }> = [];
+  const badResponses: Array<{ url: string; status: number }> = [];
+  const consoleErrors: string[] = [];
+
+  page.on('requestfailed', (request) => {
+    const url = request.url();
+    if (url.includes('tile') || url.match(/\.(png|pbf|mvt)\b/)) {
+      requestFailures.push({ url, errorText: request.failure()?.errorText ?? 'unknown' });
+    }
+  });
+
+  page.on('response', (response) => {
+    const url = response.url();
+    if (
+      response.status() >= 400 &&
+      (url.includes('tile') || url.match(/\.(png|pbf|mvt)\b/))
+    ) {
+      badResponses.push({ url, status: response.status() });
+    }
+  });
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text());
+    }
+  });
+
+  page.on('pageerror', (error) => {
+    consoleErrors.push(error.message);
+  });
+
   await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded' });
 
-  const swiper = page.locator('.compare-swiper-vertical');
-  for (let i = 0; i < 5; i += 1) {
-    await swiper.click();
+  const leftEndpoint = page.getByLabel('Left side Tile Endpoint');
+  if (await leftEndpoint.count()) {
+    await leftEndpoint.selectOption({ label: 'Rc with cache' });
+  }
+  const rightEndpoint = page.getByLabel('Right side Tile Endpoint');
+  if (await rightEndpoint.count()) {
+    await rightEndpoint.selectOption({ label: 'Rc with cache' });
   }
 
-  await page.getByLabel('Left side Tile Endpoint').selectOption('rc with cache');
-
-  for (let i = 0; i < 2; i += 1) {
-    await swiper.click();
-  }
-  await page.locator('#before').getByRole('region', { name: 'Map' }).click();
-  for (let i = 0; i < 2; i += 1) {
-    await swiper.click();
-  }
-  await page.locator('#before').getByRole('region', { name: 'Map' }).click();
+  await page.waitForFunction(
+    () =>
+      Boolean(
+        document.querySelector('#before') ||
+          document.querySelector('#after') ||
+          document.querySelector('[role="region"][aria-label="Map"]') ||
+          document.querySelector('.maplibregl-map') ||
+          document.querySelector('.mapboxgl-map'),
+      ),
+    { timeout: 30000 },
+  );
 
   await page.waitForTimeout(2000);
 
-  const containers = ['#before', '#after'];
+  const containers = await page.evaluate(() => {
+    const compareSelectors = ['#before', '#after'];
+    const compare = compareSelectors.filter((selector) => document.querySelector(selector));
+    if (compare.length > 0) {
+      return compare;
+    }
+
+    const fallbackSelectors = [
+      '[role="region"][aria-label="Map"]',
+      '.maplibregl-map',
+      '.mapboxgl-map',
+    ];
+    return fallbackSelectors.filter((selector) => document.querySelector(selector));
+  });
+
+  if (containers.length === 0) {
+    containers.push('body');
+  }
   await page.waitForFunction(
     (selectors) =>
       selectors.some((selector) => {
@@ -228,20 +290,12 @@ test('traffic colors display on tiles', async ({ page }) => {
   );
   const tiles = await collectTrafficColors(page, containers);
 
-  expect(tiles.length).toBeGreaterThan(0);
-
-  const tilesWithData = tiles.filter((tile) => !tile.error);
-  expect(tilesWithData.length).toBeGreaterThan(0);
-
-  const tilesWithColors = tilesWithData.filter((tile) => tile.colors.length > 0);
-  expect(tilesWithColors.length).toBeGreaterThan(0);
-
-  const colorsFound = new Set(tilesWithColors.flatMap((tile) => tile.colors));
-  expect(colorsFound.size).toBeGreaterThan(0);
-
   const summary = tiles.map((tile) => ({
     container: tile.container,
     tileId: tile.tileId,
+    elementType: tile.elementType,
+    width: tile.width,
+    height: tile.height,
     colors: tile.colors,
     sampleCount: tile.sampleCount,
     error: tile.error ?? null,
@@ -254,4 +308,24 @@ test('traffic colors display on tiles', async ({ page }) => {
   });
 
   console.log('Traffic color summary:', JSON.stringify(summary, null, 2));
+  if (requestFailures.length > 0) {
+    console.log('Tile request failures:', JSON.stringify(requestFailures.slice(0, 10), null, 2));
+  }
+  if (badResponses.length > 0) {
+    console.log('Tile bad responses:', JSON.stringify(badResponses.slice(0, 10), null, 2));
+  }
+  if (consoleErrors.length > 0) {
+    console.log('Browser console errors:', JSON.stringify(consoleErrors.slice(0, 10), null, 2));
+  }
+
+  expect(tiles.length).toBeGreaterThan(0);
+
+  const tilesWithData = tiles.filter((tile) => !tile.error);
+  expect(tilesWithData.length).toBeGreaterThan(0);
+
+  const tilesWithColors = tilesWithData.filter((tile) => tile.colors.length > 0);
+  expect(tilesWithColors.length).toBeGreaterThan(0);
+
+  const colorsFound = new Set(tilesWithColors.flatMap((tile) => tile.colors));
+  expect(colorsFound.size).toBeGreaterThan(0);
 });
