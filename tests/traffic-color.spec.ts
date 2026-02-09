@@ -8,6 +8,9 @@ type TileColorSummary = {
   index: number;
   tileId: string;
   src: string | null;
+  elementType: 'img' | 'canvas';
+  width: number;
+  height: number;
   colors: string[];
   colorCounts: Record<string, number>;
   sampleCount: number;
@@ -165,14 +168,20 @@ async function collectTrafficColors(
       });
 
       tiles.forEach((tile, index) => {
-        const src = tile instanceof HTMLImageElement ? tile.currentSrc || tile.src : null;
+        const isImage = tile instanceof HTMLImageElement;
+        const src = isImage ? tile.currentSrc || tile.src : null;
         const tileId = tileIdFromUrl(src, `${container}-tile-${index}`);
+        const width = isImage ? tile.naturalWidth || tile.width : tile.width;
+        const height = isImage ? tile.naturalHeight || tile.height : tile.height;
         const analyzed = readElementPixels(tile as HTMLImageElement | HTMLCanvasElement);
         results.push({
           container,
           index,
           tileId,
           src: trimSrc(src),
+          elementType: isImage ? 'img' : 'canvas',
+          width,
+          height,
           colors: analyzed.colors,
           colorCounts: analyzed.counts,
           sampleCount: analyzed.sampleCount,
@@ -186,6 +195,37 @@ async function collectTrafficColors(
 }
 
 test('traffic colors display on tiles', async ({ page }) => {
+  const requestFailures: Array<{ url: string; errorText: string }> = [];
+  const badResponses: Array<{ url: string; status: number }> = [];
+  const consoleErrors: string[] = [];
+
+  page.on('requestfailed', (request) => {
+    const url = request.url();
+    if (url.includes('tile') || url.match(/\.(png|pbf|mvt)\b/)) {
+      requestFailures.push({ url, errorText: request.failure()?.errorText ?? 'unknown' });
+    }
+  });
+
+  page.on('response', (response) => {
+    const url = response.url();
+    if (
+      response.status() >= 400 &&
+      (url.includes('tile') || url.match(/\.(png|pbf|mvt)\b/))
+    ) {
+      badResponses.push({ url, status: response.status() });
+    }
+  });
+
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      consoleErrors.push(message.text());
+    }
+  });
+
+  page.on('pageerror', (error) => {
+    consoleErrors.push(error.message);
+  });
+
   await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded' });
 
   const leftEndpoint = page.getByLabel('Left side Tile Endpoint');
@@ -253,6 +293,9 @@ test('traffic colors display on tiles', async ({ page }) => {
   const summary = tiles.map((tile) => ({
     container: tile.container,
     tileId: tile.tileId,
+    elementType: tile.elementType,
+    width: tile.width,
+    height: tile.height,
     colors: tile.colors,
     sampleCount: tile.sampleCount,
     error: tile.error ?? null,
@@ -265,6 +308,15 @@ test('traffic colors display on tiles', async ({ page }) => {
   });
 
   console.log('Traffic color summary:', JSON.stringify(summary, null, 2));
+  if (requestFailures.length > 0) {
+    console.log('Tile request failures:', JSON.stringify(requestFailures.slice(0, 10), null, 2));
+  }
+  if (badResponses.length > 0) {
+    console.log('Tile bad responses:', JSON.stringify(badResponses.slice(0, 10), null, 2));
+  }
+  if (consoleErrors.length > 0) {
+    console.log('Browser console errors:', JSON.stringify(consoleErrors.slice(0, 10), null, 2));
+  }
 
   expect(tiles.length).toBeGreaterThan(0);
 
